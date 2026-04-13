@@ -17,18 +17,89 @@ Replace this paragraph with your own summary of what your version does.
 
 ## How The System Works
 
-Explain your design in plain language.
+### What data each Song and UserProfile store
 
-Some prompts to answer:
+Each `Song` stores both categorical and numeric features:
 
-- What features does each `Song` use in your system
-  - For example: genre, mood, energy, tempo
-- What information does your `UserProfile` store
-- How does your `Recommender` compute a score for each song
-- How do you choose which songs to recommend
+- **Categorical:** `id`, `title`, `artist`, `genre`, `mood`
+- **Numeric:** `energy` (0–1), `tempo_bpm`, `valence` (0–1), `danceability` (0–1), `acousticness` (0–1)
 
-You can include a simple diagram or bullet list if helpful.
+Each `UserProfile` stores the user's taste targets:
 
+- **Categorical preferences:** `favorite_genre`, `favorite_mood`
+- **Numeric targets:** `target_energy`, `target_tempo_bpm`, `target_valence`, `target_danceability`, `target_acousticness`
+- **Convenience flag:** `likes_acoustic`
+
+---
+
+### Algorithm Recipe
+
+For every song in the catalog, the system computes a score using three rules applied in sequence:
+
+| Rule | Points awarded |
+|---|---|
+| `song.genre == favorite_genre` | **+2.0** (fixed bonus) |
+| `song.mood == favorite_mood` | **+1.0** (fixed bonus) |
+| Energy similarity | **+0.0 to +1.0** — calculated as `1.0 - abs(song.energy - target_energy)` |
+| **Maximum possible score** | **4.0** |
+
+The energy rule is continuous, not binary. A perfect energy match gives +1.0. A difference of 0.5 gives +0.5. A difference of 1.0 gives 0.0. This means two songs that both match genre and mood are separated entirely by how close their energy is to the user's target.
+
+After every song is scored, the list is sorted by score descending and the top `k` results are returned (default `k = 5`).
+
+---
+
+### Potential Biases
+
+- **Genre over-prioritization.** A +2.0 genre bonus is twice the mood bonus. A lofi song in the wrong mood will almost always outrank a perfectly mood-matched song from another genre. A jazz track tagged "focused" will consistently lose to a lofi track tagged "chill" for a user who wants focused lofi — which is the opposite of what the user actually needs in that moment.
+
+- **Small catalog amplifies genre imbalance.** The catalog has only 3 lofi songs, 2 pop songs, and 1 song each for most other genres. A user whose favorite genre is underrepresented gets 3 candidates at most, regardless of how many songs would suit their mood or energy.
+
+- **Energy is the only numeric signal.** Tempo, valence, danceability, and acousticness are loaded but never scored. Two songs can have identical scores while sounding very different — for example, a slow acoustic ballad and a fast electronic track could tie if they share genre, mood, and energy level.
+
+- **No diversity.** The algorithm always returns the closest matches. It will never surface a surprising but enjoyable song outside the user's stated preferences, which is a pattern real recommenders work hard to counteract.
+
+### Data Flow
+
+```mermaid
+flowchart TD
+    A([User Preferences\nfavorite_genre · favorite_mood · target_energy])
+    B([songs.csv])
+
+    B --> C[load_songs\nParse each row into a song dict]
+    C --> D[scored = empty list]
+    A --> D
+
+    D --> E{For each song\nin catalog}
+
+    E --> F[score = 0.0]
+
+    F --> G{song.genre ==\nfavorite_genre?}
+    G -- Yes --> H[score += 2.0]
+    G -- No  --> I[no change]
+
+    H --> J{song.mood ==\nfavorite_mood?}
+    I --> J
+
+    J -- Yes --> K[score += 1.0]
+    J -- No  --> L[no change]
+
+    K --> M["energy_sim = 1.0 − |song.energy − target_energy|\nscore += energy_sim  ← 0.0 to 1.0"]
+    L --> M
+
+    M --> N[Build explanation string\nbased on which rules fired]
+    N --> O[Append  song · score · explanation\nto scored list]
+
+    O --> E
+
+    E -- All songs processed --> P[Sort scored list\nby score descending]
+    P --> Q[Slice top K entries]
+    Q --> R([Output\nTitle — Score: X.XX\nBecause: explanation])
+```
+
+ ### Terminal Output Sample
+ ![alt text](<CleanShot 2026-04-12 at 22.31.47@2x.png>)
+ 
 ---
 
 ## Getting Started
